@@ -34,8 +34,75 @@ header {
 h1 {
   font-size: 16px;
   font-weight: 600;
-  margin: 0 auto 0 0;
+  margin: 0;
   letter-spacing: 0.02em;
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 auto 0 12px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.mode-tabs button {
+  border: none;
+  border-radius: 4px;
+  padding: 3px 12px;
+  color: var(--muted);
+}
+
+.mode-tabs button.active {
+  background: var(--panel);
+  color: var(--accent);
+}
+
+/* Suggest mode fits one screen: hands stay on the keys, so nothing may need scrolling. */
+body[data-mode="suggest"] .patch-bar,
+body[data-mode="suggest"] #controls,
+body[data-mode="suggest"] .readout,
+body[data-mode="suggest"] #keyboard,
+body[data-mode="suggest"] .hint,
+body[data-mode="suggest"] .chord-alternatives,
+body:not([data-mode="suggest"]) #suggest {
+  display: none;
+}
+
+body[data-mode="suggest"] header {
+  padding: 8px 24px;
+}
+
+body[data-mode="suggest"] main {
+  max-width: 1400px;
+  padding: 12px 24px;
+  gap: 10px;
+}
+
+body[data-mode="suggest"] .chord-panel {
+  height: 72px;
+  padding: 6px 20px;
+}
+
+body[data-mode="suggest"] .chord-symbol {
+  height: 56px;
+  line-height: 56px;
+}
+
+body[data-mode="suggest"] .chord-function {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+body[data-mode="suggest"] .chord-roman {
+  height: 52px;
+  line-height: 52px;
+}
+
+body[data-mode="suggest"] .chord-name {
+  font-size: 17px;
 }
 
 .pill {
@@ -371,6 +438,253 @@ button:hover {
 
 #panic {
   margin-left: auto;
+}
+
+.suggest {
+  display: grid;
+  gap: 10px;
+}
+
+.progression {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.progression-label,
+.suggest-title {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.progression-chain {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.progression-empty {
+  color: var(--muted);
+}
+
+.progression-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.progression-chip.current {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.chip-symbol {
+  font-weight: 600;
+}
+
+.chip-roman,
+.suggestion-roman {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  color: var(--accent);
+}
+
+.progression-step {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.progression-step.followed {
+  color: var(--ok);
+}
+
+.suggest-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.suggest-column {
+  display: grid;
+  gap: 8px;
+}
+
+.suggest-none {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.suggestion {
+  display: grid;
+  gap: 3px;
+  padding: 7px 10px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  border-left: 3px solid var(--group-color, var(--line));
+}
+
+.suggest-column.strong {
+  --group-color: var(--ok);
+}
+
+.suggest-column.color {
+  --group-color: var(--accent);
+}
+
+.suggest-column.surprise {
+  --group-color: #b48cf0;
+}
+
+.suggestion:hover {
+  border-color: var(--muted);
+  border-left-color: var(--group-color);
+}
+
+.suggestion:active {
+  background: color-mix(in srgb, var(--group-color) 10%, var(--panel));
+}
+
+.suggestion.back {
+  opacity: 0.6;
+}
+
+.suggestion-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.suggestion-symbol {
+  font-size: 21px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.suggestion-roman {
+  margin-left: auto;
+  font-size: 19px;
+  white-space: nowrap;
+}
+
+.suggestion-technique {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--group-color);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.suggestion-why {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.suggestion-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.suggestion-motion {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+}
+
+.suggestion-then {
+  flex-shrink: 0;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Fixed height so wide columns don't grow the keyboards; the drawing letterboxes instead. */
+.mini-keyboard {
+  width: 100%;
+  height: clamp(82px, 14.2vh, 130px);
+  margin: 2px 0;
+}
+
+.mk-white {
+  fill: #e9e9ee;
+}
+
+.mk-black {
+  fill: #26262c;
+}
+
+.mk-target,
+.mk-common {
+  fill: var(--group-color);
+}
+
+.mk-black.mk-target,
+.mk-black.mk-common {
+  fill: color-mix(in srgb, var(--group-color) 75%, black);
+}
+
+.mk-leaving {
+  fill: color-mix(in srgb, var(--muted) 45%, transparent);
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 1.5;
+}
+
+.mk-dot {
+  fill: var(--bg);
+}
+
+.mk-arrow {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1.2;
+}
+
+.mk-arrowhead {
+  fill: var(--text);
+}
+
+.mk-plus {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+@media (max-width: 700px) {
+  .suggest-columns {
+    grid-template-columns: 1fr;
+  }
 }
 
 kbd {

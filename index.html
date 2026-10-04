@@ -10,6 +10,10 @@
   <body>
     <header>
       <h1>browser synth</h1>
+      <nav class="mode-tabs" aria-label="Mode">
+        <button type="button" data-mode="synth">Synth</button>
+        <button type="button" data-mode="suggest">Suggest</button>
+      </nav>
       <div id="audio-status" class="pill warn">Click or press a key to start audio</div>
       <div id="midi-status" class="pill">MIDI: connecting…</div>
     </header>
@@ -44,6 +48,7 @@
             </label>
           </div>
         </div>
+        <section id="suggest" class="suggest"></section>
         <div class="readout">
           <span>Octave <strong id="octave">4</strong> <kbd>Z</kbd><kbd>X</kbd></span>
           <span>Velocity <strong id="velocity">100</strong> <kbd>C</kbd><kbd>V</kbd></span>
@@ -53,6 +58,7 @@
         <p class="hint">
           Play with <kbd>A</kbd>–<kbd>;</kbd> (white) and <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> <kbd>O</kbd> <kbd>P</kbd> (black), the mouse, or a MIDI keyboard.
           To map a knob: click <em>learn</em> on a control, then move the knob. <kbd>Esc</kbd> cancels.
+          In <em>Suggest</em>, click a card to hear its voicing; playing a chord moves the board on.
         </p>
       </section>
     </main>

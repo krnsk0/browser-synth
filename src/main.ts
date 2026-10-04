@@ -1,6 +1,10 @@
 import { Synth } from "./audio/synth";
-import { readChord } from "./chords";
+import { readChord, type ChordReading } from "./chords";
+import { chordPitchClasses, chordSpelling, parseChordSymbol, samePitchClasses } from "./harmony";
 import { KEYS, keyId, keySpelling, parseKey } from "./keys";
+import { ProgressionTracker, type PlayedChord } from "./progression";
+import { buildBoard, describeChord, type Card } from "./suggest";
+import { SuggestView, type StripChord } from "./ui/suggestView";
 import { ComputerKeyboard } from "./input/computerKeyboard";
 import { connectMidi, type MidiMessage, type MidiStatus } from "./input/midi";
 import { MidiLearn } from "./midiLearn";
@@ -14,6 +18,7 @@ const WORKING_PATCH_KEY = "browser-synth:patch:v1";
 const PATCH_NAME_KEY = "browser-synth:patch-name:v1";
 const KEYBOARD_KEY = "browser-synth:keyboard:v1";
 const KEY_KEY = "browser-synth:key:v1";
+const MODE_KEY = "browser-synth:mode:v1";
 const SUSTAIN_CC = 64;
 const ALL_NOTES_OFF_CC = 123;
 
@@ -250,16 +255,16 @@ let shownNotes: number[] = [];
 const pretty = (text: string) => text.replace(/([A-G1-7IViv°]|^)b/g, "$1♭").replace(/#/g, "♯");
 
 /** Roman first: its box sets how much width is left for the symbol. */
-const FIT_TEXT: [id: string, maxPx: number][] = [
-  ["chord-roman", 88],
-  ["chord-symbol", 96],
-];
+const FIT_TEXT = ["chord-roman", "chord-symbol"];
 
-/** Shrinks the big readouts so long symbols like Cmaj9♯11/E fit their box at a fixed height. */
+/**
+ * Shrinks the big readouts so long symbols like Cmaj9♯11/E fit their box.
+ * The box's CSS height is the largest size, so each mode sets its own.
+ */
 function fitChordText(): void {
-  for (const [id, maxPx] of FIT_TEXT) {
+  for (const id of FIT_TEXT) {
     const el = $(id);
-    let size = maxPx;
+    let size = parseFloat(getComputedStyle(el).height);
     el.style.fontSize = `${size}px`;
     while (size > 20 && el.scrollWidth > el.clientWidth) {
       size = Math.max(20, Math.min(size - 1, Math.floor((size * el.clientWidth) / el.scrollWidth)));
@@ -270,9 +275,9 @@ function fitChordText(): void {
 
 window.addEventListener("resize", fitChordText);
 
-function showReading(notes: number[]): void {
+function showReading(notes: number[]): ChordReading | null {
   const reading = readChord(notes, musicalKey);
-  if (!reading) return;
+  if (!reading) return null;
   shownNotes = notes;
   const spelling = keySpelling(musicalKey);
   $("chord-symbol").textContent = pretty(reading.symbol);
@@ -282,6 +287,7 @@ function showReading(notes: number[]): void {
   $("chord-roman").textContent = reading.roman ? pretty(reading.roman) : "";
   for (const id of ["chord-name", "chord-notes", "chord-alternatives"]) $(id).title = $(id).textContent ?? "";
   fitChordText();
+  return reading;
 }
 
 /**
@@ -293,7 +299,100 @@ function renderChord(held: ReadonlySet<number>): void {
   const added = held.size > lastHeldCount;
   lastHeldCount = held.size;
   chordPanel.classList.toggle("released", held.size === 0);
-  if (added) showReading([...held].sort((a, b) => a - b));
+  if (!added) return;
+  const notes = [...held].sort((a, b) => a - b);
+  const reading = showReading(notes);
+  if (reading) trackChord(reading, notes);
+}
+
+// --- Suggest mode -----------------------------------------------------------
+
+type ViewMode = "synth" | "suggest";
+let viewMode: ViewMode = localStorage.getItem(MODE_KEY) === "suggest" ? "suggest" : "synth";
+
+const tracker = new ProgressionTracker();
+let cards: Card[] = [];
+/** The board that was showing when the current chord was played, to tell whether it was a suggestion. */
+let boardBeforeCurrent: Card[] = [];
+
+const suggestView = new SuggestView($("suggest"), {
+  pretty,
+  play: audition,
+  clear: () => {
+    tracker.clear();
+    cards = [];
+    boardBeforeCurrent = [];
+    renderSuggest();
+  },
+});
+
+function trackChord(reading: ChordReading, notes: number[]): void {
+  const chord = reading.kind === "chord" ? parseChordSymbol(reading.symbol) : null;
+  if (!chord) return;
+  const result = tracker.play(chord, notes, performance.now());
+  if (result === "new") boardBeforeCurrent = cards;
+  // Exact notes, not the reduced chord: C6 shares Am7's notes but would reduce to plain C.
+  // A partial E–F–A already reads as Fmaj7, so the match can arrive on a revoicing too.
+  const followed = boardBeforeCurrent.find((c) => samePitchClasses(chordPitchClasses(c.chord), notes));
+  if (followed && tracker.current) {
+    tracker.current.via = followed.technique;
+    // Same notes, read the way the suggestion meant them: Am7/E after G7, not C6/E.
+    tracker.current.chord = followed.chord;
+  }
+  renderSuggest();
+}
+
+function stripChord(played: PlayedChord): StripChord {
+  if (played.via) return { ...describeChord(played.chord, played.notes, musicalKey), via: played.via };
+  const reading = readChord(played.notes, musicalKey);
+  return { symbol: reading?.symbol ?? "?", roman: reading?.roman ?? null };
+}
+
+function renderSuggest(): void {
+  if (viewMode !== "suggest") return;
+  const current = tracker.current;
+  cards = current ? buildBoard(current, tracker.history, musicalKey) : [];
+  const currentReading = current ? readChord(current.notes, musicalKey) : null;
+  suggestView.render({
+    history: tracker.history.map(stripChord),
+    current: current ? stripChord(current) : null,
+    heldNotes: current?.notes ?? [],
+    heldSpelling: currentReading ? chordSpelling(currentReading.symbol, musicalKey) : keySpelling(musicalKey),
+    cards,
+  });
+}
+
+let auditionNotes: number[] = [];
+let auditionTimer: number | undefined;
+
+function audition(notes: number[]): void {
+  void synth.resume();
+  window.clearTimeout(auditionTimer);
+  for (const n of auditionNotes) synth.noteOff(n);
+  auditionNotes = notes;
+  for (const n of notes) synth.noteOn(n, 90);
+  auditionTimer = window.setTimeout(() => {
+    for (const n of notes) synth.noteOff(n);
+    auditionNotes = [];
+  }, 1100);
+}
+
+const modeTabs = [...document.querySelectorAll<HTMLButtonElement>(".mode-tabs button")];
+
+function setViewMode(next: ViewMode): void {
+  viewMode = next;
+  localStorage.setItem(MODE_KEY, next);
+  document.body.dataset.mode = next;
+  for (const tab of modeTabs) tab.classList.toggle("active", tab.dataset.mode === next);
+  fitChordText();
+  renderSuggest();
+}
+
+for (const tab of modeTabs) {
+  tab.addEventListener("click", () => {
+    setViewMode(tab.dataset.mode === "suggest" ? "suggest" : "synth");
+    tab.blur();
+  });
 }
 
 keySelect.replaceChildren(new Option("None", ""), ...KEYS.map((k) => new Option(pretty(keyId(k)), keyId(k))));
@@ -302,8 +401,11 @@ keySelect.addEventListener("change", () => {
   musicalKey = parseKey(keySelect.value);
   localStorage.setItem(KEY_KEY, keySelect.value);
   if (shownNotes.length) showReading(shownNotes);
+  renderSuggest();
   keySelect.blur();
 });
+
+setViewMode(viewMode);
 
 synth.onHeldChange = (held) => {
   keyboardView.setHeld(held);

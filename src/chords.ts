@@ -1,4 +1,5 @@
 import { Chord, Note } from "tonal";
+import { parseChordSymbol, rootName, secondaryTarget } from "./harmony";
 import { degreeNumeral, keySpelling, tonicPitchClass, type MusicalKey } from "./keys";
 import { noteName, pitchClassName } from "./ui/noteNames";
 
@@ -22,7 +23,7 @@ const ROOT = /^[A-G][#b]?/;
 const SLASH_BASS = /\/[A-G][#b]?$/;
 
 const SCALE_DEGREES = ["1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"];
-const TRIAD_TYPES = new Set(["M", "m", "dim", "aug"]);
+const TRIAD_TYPES = new Set(["", "M", "m", "dim", "aug"]);
 const SEVENTH_TYPES = new Set(["7", "maj7", "m7", "m7b5", "dim7"]);
 
 export interface ChordReading {
@@ -99,12 +100,21 @@ export function romanNumeral(symbol: string, key: MusicalKey, spelling: readonly
     const mark = inversion(type, bassInterval);
     if (mark) {
       figure = mark;
-      if (SEVENTH_TYPES.has(type)) tail = suffix.replace(/7$/, "");
+      if (SEVENTH_TYPES.has(type)) tail = suffix.replace(/maj7$/, "M").replace(/7$/, "");
     } else {
       figure = `/${spelling[Note.chroma(chord.bass)]}`;
     }
   }
   return `${accidental}${lower ? base.toLowerCase() : base}${tail}${figure}`;
+}
+
+/** Roman numeral, with secondary dominants named by their target: D7 in C is V7/V, not II7. */
+export function functionLabel(symbol: string, key: MusicalKey, spelling: readonly string[]): string {
+  const chord = parseChordSymbol(symbol);
+  const target = chord && secondaryTarget(chord, key);
+  if (!target) return romanNumeral(symbol, key, spelling);
+  const local: MusicalKey = { tonic: rootName(tonicPitchClass(key) + target.s, key), mode: "major" };
+  return `${romanNumeral(symbol, local, spelling)}/${target.numeral}`;
 }
 
 export function readChord(notes: Iterable<number>, key: MusicalKey | null = null): ChordReading | null {
@@ -128,7 +138,7 @@ export function readChord(notes: Iterable<number>, key: MusicalKey | null = null
   if (candidates.length > 0) {
     const [best, ...rest] = candidates;
     const alternatives = rest.filter((s) => alterations(s) <= alterations(best)).slice(0, 3).map(displaySymbol);
-    const roman = key ? romanNumeral(best, key, spelling) : null;
+    const roman = key ? functionLabel(best, key, spelling) : null;
     return { kind: "chord", symbol: displaySymbol(best), name: describe(best), alternatives, roman };
   }
 
