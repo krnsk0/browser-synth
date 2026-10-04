@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>browser synth</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>browser synth</h1>
+      <div id="audio-status" class="pill warn">Click or press a key to start audio</div>
+      <div id="midi-status" class="pill">MIDI: connecting…</div>
+    </header>
+
+    <main>
+      <section class="patch-bar">
+        <label for="patch-select">Patch</label>
+        <select id="patch-select"></select>
+        <span id="patch-modified" class="modified" hidden>edited</span>
+        <button id="patch-save" type="button">Save</button>
+        <button id="patch-save-as" type="button">Save as…</button>
+        <button id="patch-delete" type="button">Delete</button>
+      </section>
+
+      <section id="controls" class="controls"></section>
+
+      <section class="performance">
+        <div class="readout">
+          <span>Held: <strong id="held-notes">—</strong></span>
+          <span>Octave <strong id="octave">4</strong> <kbd>Z</kbd><kbd>X</kbd></span>
+          <span>Velocity <strong id="velocity">100</strong> <kbd>C</kbd><kbd>V</kbd></span>
+          <button id="panic" type="button" title="Stop all notes">Panic</button>
+        </div>
+        <div id="keyboard" class="keyboard"></div>
+        <p class="hint">
+          Play with <kbd>A</kbd>–<kbd>;</kbd> (white) and <kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> <kbd>O</kbd> <kbd>P</kbd> (black), the mouse, or a MIDI keyboard.
+          To map a knob: click <em>learn</em> on a control, then move the knob. <kbd>Esc</kbd> cancels.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
