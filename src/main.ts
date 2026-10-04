@@ -1,15 +1,19 @@
 import { Synth } from "./audio/synth";
+import { readChord } from "./chords";
+import { KEYS, keyId, keySpelling, parseKey } from "./keys";
 import { ComputerKeyboard } from "./input/computerKeyboard";
 import { connectMidi, type MidiMessage, type MidiStatus } from "./input/midi";
 import { MidiLearn } from "./midiLearn";
 import { PARAMS, PARAM_BY_ID, defaultValues, fromNormalized, toNormalized, type ParamGroup, type ParamId, type ParamValues } from "./params";
 import { PatchStore, patchesEqual, sanitizePatch } from "./patches";
+import { EnvelopeView } from "./ui/envelopeView";
 import { KeyboardView } from "./ui/keyboard";
 import { noteName } from "./ui/noteNames";
 
 const WORKING_PATCH_KEY = "browser-synth:patch:v1";
 const PATCH_NAME_KEY = "browser-synth:patch-name:v1";
 const KEYBOARD_KEY = "browser-synth:keyboard:v1";
+const KEY_KEY = "browser-synth:key:v1";
 const SUSTAIN_CC = 64;
 const ALL_NOTES_OFF_CC = 123;
 
@@ -56,6 +60,13 @@ function setParam(id: ParamId, value: number, source: "slider" | "external"): vo
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => localStorage.setItem(WORKING_PATCH_KEY, JSON.stringify(values)), 250);
   renderPatchModified();
+  renderEnvelopes();
+}
+
+let envelopeView: EnvelopeView | undefined;
+
+function renderEnvelopes(): void {
+  envelopeView?.update({ attack: values.attack, decay: values.decay, sustain: values.sustain, release: values.release });
 }
 
 function renderLearnState(): void {
@@ -64,28 +75,38 @@ function renderLearnState(): void {
     const source = learn.sourceFor(id);
     const armed = learn.armed === id;
     els.root.classList.toggle("armed", armed);
-    els.learnButton.textContent = armed ? "move a knob…" : source ? `CC ${source.controller}${source.channel === 1 ? "" : ` · ch ${source.channel}`}` : "learn";
+    els.learnButton.textContent = armed ? "move…" : source ? `CC ${source.controller}${source.channel === 1 ? "" : ` · ch ${source.channel}`}` : "learn";
     els.learnButton.classList.toggle("bound", Boolean(source));
     els.clearButton.hidden = !source;
   }
 }
 
+const LAYOUT: readonly (readonly ParamGroup[])[] = [["Oscillator", "Filter"], ["Amp Env", "Drive"], ["Reverb", "Output"]];
+
 function buildControls(container: HTMLElement): void {
   const groups = new Map<ParamGroup, HTMLElement>();
-  for (const def of PARAMS) {
-    let group = groups.get(def.group);
-    if (!group) {
-      group = document.createElement("fieldset");
+  for (const columnGroups of LAYOUT) {
+    const column = document.createElement("div");
+    column.className = "column";
+    for (const name of columnGroups) {
+      const group = document.createElement("fieldset");
       group.className = "group";
+      if (PARAMS.filter((p) => p.group === name).length >= 4) group.classList.add("wide");
       const legend = document.createElement("legend");
-      legend.textContent = def.group;
+      legend.textContent = name;
       group.append(legend);
-      groups.set(def.group, group);
-      container.append(group);
+      if (name === "Amp Env") envelopeView = new EnvelopeView(group);
+      groups.set(name, group);
+      column.append(group);
     }
+    container.append(column);
+  }
+
+  for (const def of PARAMS) {
+    const group = groups.get(def.group)!;
 
     const root = document.createElement("div");
-    root.className = "control";
+    root.className = `control control-${def.id}`;
 
     const label = document.createElement("label");
     label.textContent = def.label;
@@ -96,7 +117,7 @@ function buildControls(container: HTMLElement): void {
     slider.id = `param-${def.id}`;
     slider.min = "0";
     slider.max = "1";
-    slider.step = "0.001";
+    slider.step = def.curve === "stepped" ? String(1 / (def.max - def.min)) : "0.001";
     slider.value = String(toNormalized(def, values[def.id]));
     slider.addEventListener("input", () => setParam(def.id, fromNormalized(def, Number(slider.value)), "slider"));
     slider.addEventListener("dblclick", () => setParam(def.id, def.defaultValue, "external"));
@@ -132,6 +153,7 @@ function buildControls(container: HTMLElement): void {
     controls.set(def.id, { root, slider, value, learnButton, clearButton });
   }
   renderLearnState();
+  renderEnvelopes();
 }
 
 buildControls($("controls"));
@@ -210,7 +232,6 @@ window.addEventListener("keydown", (e) => {
 
 // --- Notes ------------------------------------------------------------------
 
-const heldEl = $("held-notes");
 const keyboardView = new KeyboardView($("keyboard"), {
   lowest: 36,
   highest: 84,
@@ -218,10 +239,75 @@ const keyboardView = new KeyboardView($("keyboard"), {
   noteOff: (note) => synth.noteOff(note),
 });
 
+const chordPanel = $("chord-panel");
+
+const keySelect = $<HTMLSelectElement>("key-select");
+let musicalKey = parseKey(localStorage.getItem(KEY_KEY));
+let lastHeldCount = 0;
+let shownNotes: number[] = [];
+
+/** Display-only: lead sheets print ♭ and ♯, Tonal's symbols use b and #. */
+const pretty = (text: string) => text.replace(/([A-G1-7IViv°]|^)b/g, "$1♭").replace(/#/g, "♯");
+
+/** Roman first: its box sets how much width is left for the symbol. */
+const FIT_TEXT: [id: string, maxPx: number][] = [
+  ["chord-roman", 88],
+  ["chord-symbol", 96],
+];
+
+/** Shrinks the big readouts so long symbols like Cmaj9♯11/E fit their box at a fixed height. */
+function fitChordText(): void {
+  for (const [id, maxPx] of FIT_TEXT) {
+    const el = $(id);
+    let size = maxPx;
+    el.style.fontSize = `${size}px`;
+    while (size > 20 && el.scrollWidth > el.clientWidth) {
+      size = Math.max(20, Math.min(size - 1, Math.floor((size * el.clientWidth) / el.scrollWidth)));
+      el.style.fontSize = `${size}px`;
+    }
+  }
+}
+
+window.addEventListener("resize", fitChordText);
+
+function showReading(notes: number[]): void {
+  const reading = readChord(notes, musicalKey);
+  if (!reading) return;
+  shownNotes = notes;
+  const spelling = keySpelling(musicalKey);
+  $("chord-symbol").textContent = pretty(reading.symbol);
+  $("chord-name").textContent = pretty(reading.name);
+  $("chord-notes").textContent = pretty(notes.map((n) => noteName(n, spelling)).join("  "));
+  $("chord-alternatives").textContent = reading.alternatives.length ? pretty(`also ${reading.alternatives.join(" · ")}`) : "";
+  $("chord-roman").textContent = reading.roman ? pretty(reading.roman) : "";
+  for (const id of ["chord-name", "chord-notes", "chord-alternatives"]) $(id).title = $(id).textContent ?? "";
+  fitChordText();
+}
+
+/**
+ * Only adding notes changes the reading: keys come up one at a time, and
+ * re-reading on each release would end on a lone note instead of the chord.
+ * After full release the chord stays up, dimmed.
+ */
+function renderChord(held: ReadonlySet<number>): void {
+  const added = held.size > lastHeldCount;
+  lastHeldCount = held.size;
+  chordPanel.classList.toggle("released", held.size === 0);
+  if (added) showReading([...held].sort((a, b) => a - b));
+}
+
+keySelect.replaceChildren(new Option("None", ""), ...KEYS.map((k) => new Option(pretty(keyId(k)), keyId(k))));
+keySelect.value = musicalKey ? keyId(musicalKey) : "";
+keySelect.addEventListener("change", () => {
+  musicalKey = parseKey(keySelect.value);
+  localStorage.setItem(KEY_KEY, keySelect.value);
+  if (shownNotes.length) showReading(shownNotes);
+  keySelect.blur();
+});
+
 synth.onHeldChange = (held) => {
   keyboardView.setHeld(held);
-  const names = [...held].sort((a, b) => a - b).map(noteName);
-  heldEl.textContent = names.length ? names.join(" ") : "—";
+  renderChord(held);
 };
 
 function renderKeyboardState(octave: number, velocity: number): void {

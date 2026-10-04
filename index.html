@@ -27,8 +27,24 @@
       <section id="controls" class="controls"></section>
 
       <section class="performance">
+        <div id="chord-panel" class="chord-panel released">
+          <div class="chord-reading">
+            <div id="chord-symbol" class="chord-symbol">—</div>
+            <div class="chord-meta">
+              <div id="chord-name" class="chord-name">Play some notes</div>
+              <div id="chord-notes" class="chord-notes"></div>
+              <div id="chord-alternatives" class="chord-alternatives"></div>
+            </div>
+          </div>
+          <div class="chord-function">
+            <div id="chord-roman" class="chord-roman"></div>
+            <label class="key-picker">
+              Key
+              <select id="key-select"></select>
+            </label>
+          </div>
+        </div>
         <div class="readout">
-          <span>Held: <strong id="held-notes">—</strong></span>
           <span>Octave <strong id="octave">4</strong> <kbd>Z</kbd><kbd>X</kbd></span>
           <span>Velocity <strong id="velocity">100</strong> <kbd>C</kbd><kbd>V</kbd></span>
           <button id="panic" type="button" title="Stop all notes">Panic</button>

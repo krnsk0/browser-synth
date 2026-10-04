@@ -1,5 +1,5 @@
 import type { KeyValueStore } from "./midiLearn";
-import { PARAMS, defaultValues, type ParamValues } from "./params";
+import { PARAMS, clampValue, defaultValues, type ParamValues } from "./params";
 
 const PATCHES_KEY = "browser-synth:patches:v1";
 
@@ -10,7 +10,7 @@ export function sanitizePatch(raw: unknown): ParamValues {
   const record = raw as Record<string, unknown>;
   for (const def of PARAMS) {
     const v = record[def.id];
-    if (typeof v === "number" && Number.isFinite(v)) values[def.id] = Math.min(def.max, Math.max(def.min, v));
+    if (typeof v === "number" && Number.isFinite(v)) values[def.id] = clampValue(def, v);
   }
   return values;
 }
