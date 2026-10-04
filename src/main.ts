@@ -1,13 +1,14 @@
 import { Synth } from "./audio/synth";
 import { readChord, type ChordReading } from "./chords";
-import { chordPitchClasses, chordSpelling, parseChordSymbol, samePitchClasses } from "./harmony";
+import { chordPitchClasses, parseChordSymbol, samePitchClasses } from "./harmony";
 import { KEYS, keyId, keySpelling, parseKey } from "./keys";
 import { ProgressionTracker, type PlayedChord } from "./progression";
 import { buildBoard, describeChord, type Card } from "./suggest";
-import { SuggestView, type StripChord } from "./ui/suggestView";
+import { SuggestView, type PedalMode, type StripChord } from "./ui/suggestView";
 import { ComputerKeyboard } from "./input/computerKeyboard";
 import { connectMidi, type MidiMessage, type MidiStatus } from "./input/midi";
-import { MidiLearn } from "./midiLearn";
+import { MidiLearn, isAction, type ActionId, type LearnTarget } from "./midiLearn";
+import { Playback, sanitizePlayback } from "./playback";
 import { PARAMS, PARAM_BY_ID, defaultValues, fromNormalized, toNormalized, type ParamGroup, type ParamId, type ParamValues } from "./params";
 import { PatchStore, patchesEqual, sanitizePatch } from "./patches";
 import { EnvelopeView } from "./ui/envelopeView";
@@ -19,6 +20,9 @@ const PATCH_NAME_KEY = "browser-synth:patch-name:v1";
 const KEYBOARD_KEY = "browser-synth:keyboard:v1";
 const KEY_KEY = "browser-synth:key:v1";
 const MODE_KEY = "browser-synth:mode:v1";
+const PEDAL_KEY = "browser-synth:pedal:v1";
+const PLAYBACK_KEY = "browser-synth:playback:v1";
+const PROGRESSION_KEY = "browser-synth:progression:v1";
 const SUSTAIN_CC = 64;
 const ALL_NOTES_OFF_CC = 123;
 
@@ -74,16 +78,25 @@ function renderEnvelopes(): void {
   envelopeView?.update({ attack: values.attack, decay: values.decay, sustain: values.sustain, release: values.release });
 }
 
+function learnLabel(id: LearnTarget): string {
+  const source = learn.sourceFor(id);
+  if (learn.armed === id) return "move…";
+  return source ? `CC ${source.controller}${source.channel === 1 ? "" : ` · ch ${source.channel}`}` : "learn";
+}
+
+/** Set once Suggest mode exists, so its Commit/Undo learn buttons update with the rest. */
+let onLearnChange: (() => void) | null = null;
+
 function renderLearnState(): void {
   document.body.classList.toggle("learning", learn.armed !== null);
   for (const [id, els] of controls) {
     const source = learn.sourceFor(id);
-    const armed = learn.armed === id;
-    els.root.classList.toggle("armed", armed);
-    els.learnButton.textContent = armed ? "move…" : source ? `CC ${source.controller}${source.channel === 1 ? "" : ` · ch ${source.channel}`}` : "learn";
+    els.root.classList.toggle("armed", learn.armed === id);
+    els.learnButton.textContent = learnLabel(id);
     els.learnButton.classList.toggle("bound", Boolean(source));
     els.clearButton.hidden = !source;
   }
+  onLearnChange?.();
 }
 
 const LAYOUT: readonly (readonly ParamGroup[])[] = [["Oscillator", "Filter"], ["Amp Env", "Drive"], ["Reverb", "Output"]];
@@ -229,6 +242,13 @@ $("patch-delete").addEventListener("click", () => {
 renderPatchBar();
 
 window.addEventListener("keydown", (e) => {
+  const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement;
+  if (viewMode === "suggest" && !typing && !e.repeat && (e.key === "Enter" || e.key === "Backspace")) {
+    e.preventDefault();
+    if (e.key === "Enter") commitChord();
+    else undoChord();
+    return;
+  }
   if (e.key === "Escape" && learn.armed) {
     learn.arm(null);
     renderLearnState();
@@ -252,7 +272,14 @@ let lastHeldCount = 0;
 let shownNotes: number[] = [];
 
 /** Display-only: lead sheets print ♭ and ♯, Tonal's symbols use b and #. */
-const pretty = (text: string) => text.replace(/([A-G1-7IViv°]|^)b/g, "$1♭").replace(/#/g, "♯");
+const pretty = (text: string) =>
+  text
+    // Note names (Bb, Abmaj7), numerals and degrees (bVII, b3, V/bVI), and alterations (m7b5);
+    // never the b that starts a word like "borrowed".
+    .replace(/([A-G])b/g, "$1♭")
+    .replace(/(^|[\s/(])b(?=\d|[IViv]+(?:$|[^a-z]|m|dim|aug))/g, "$1♭")
+    .replace(/(\d)b(?=\d)/g, "$1♭")
+    .replace(/#/g, "♯");
 
 /** Roman first: its box sets how much width is left for the symbol. */
 const FIT_TEXT = ["chord-roman", "chord-symbol"];
@@ -311,34 +338,88 @@ type ViewMode = "synth" | "suggest";
 let viewMode: ViewMode = localStorage.getItem(MODE_KEY) === "suggest" ? "suggest" : "synth";
 
 const tracker = new ProgressionTracker();
+tracker.restore(readJson(PROGRESSION_KEY));
 let cards: Card[] = [];
-/** The board that was showing when the current chord was played, to tell whether it was a suggestion. */
-let boardBeforeCurrent: Card[] = [];
+/** Index of the chord playback is sounding, or null when stopped. */
+let playingIndex: number | null = null;
+let pedalMode: PedalMode = localStorage.getItem(PEDAL_KEY) === "sustain" ? "sustain" : "commit";
+
+const playback = new Playback(
+  {
+    noteOn: (n, v) => synth.noteOn(n, v),
+    noteOff: (n) => synth.noteOff(n),
+    onStep: (index) => {
+      playingIndex = index;
+      renderSuggest();
+    },
+  },
+  () => tracker.history.map((h) => h.notes),
+  sanitizePlayback(readJson(PLAYBACK_KEY)),
+);
 
 const suggestView = new SuggestView($("suggest"), {
   pretty,
   play: audition,
-  clear: () => {
-    tracker.clear();
-    cards = [];
-    boardBeforeCurrent = [];
+  commit: commitChord,
+  undo: undoChord,
+  clear: clearProgression,
+  setPedal: (mode) => {
+    pedalMode = mode;
+    localStorage.setItem(PEDAL_KEY, mode);
+    synth.setSustain(false);
+    renderSuggest();
+  },
+  learn: (action) => {
+    learn.arm(learn.armed === action ? null : action);
+    renderLearnState();
+  },
+  togglePlayback: () => {
+    void synth.resume();
+    if (playback.active) playback.stop();
+    else playback.start();
+  },
+  setPlayback: (settings) => {
+    playback.settings = sanitizePlayback(settings);
+    localStorage.setItem(PLAYBACK_KEY, JSON.stringify(playback.settings));
     renderSuggest();
   },
 });
+onLearnChange = renderSuggest;
 
 function trackChord(reading: ChordReading, notes: number[]): void {
+  if (playback.active) return;
   const chord = reading.kind === "chord" ? parseChordSymbol(reading.symbol) : null;
   if (!chord) return;
-  const result = tracker.play(chord, notes, performance.now());
-  if (result === "new") boardBeforeCurrent = cards;
+  tracker.play(chord, notes, performance.now());
+  // The board stays on the last committed chord, so the candidate can be checked against it.
   // Exact notes, not the reduced chord: C6 shares Am7's notes but would reduce to plain C.
-  // A partial E–F–A already reads as Fmaj7, so the match can arrive on a revoicing too.
-  const followed = boardBeforeCurrent.find((c) => samePitchClasses(chordPitchClasses(c.chord), notes));
-  if (followed && tracker.current) {
-    tracker.current.via = followed.technique;
+  const candidate = tracker.candidate;
+  const followed = tracker.history.length ? cards.find((c) => samePitchClasses(chordPitchClasses(c.chord), notes)) : undefined;
+  if (candidate && followed) {
+    candidate.via = followed.technique;
     // Same notes, read the way the suggestion meant them: Am7/E after G7, not C6/E.
-    tracker.current.chord = followed.chord;
+    candidate.chord = followed.chord;
   }
+  progressionChanged();
+}
+
+function commitChord(): void {
+  if (tracker.commit()) progressionChanged();
+}
+
+function undoChord(): void {
+  tracker.undo();
+  progressionChanged();
+}
+
+function clearProgression(): void {
+  playback.stop();
+  tracker.clear();
+  progressionChanged();
+}
+
+function progressionChanged(): void {
+  localStorage.setItem(PROGRESSION_KEY, JSON.stringify(tracker.snapshot()));
   renderSuggest();
 }
 
@@ -350,15 +431,20 @@ function stripChord(played: PlayedChord): StripChord {
 
 function renderSuggest(): void {
   if (viewMode !== "suggest") return;
-  const current = tracker.current;
-  cards = current ? buildBoard(current, tracker.history, musicalKey) : [];
-  const currentReading = current ? readChord(current.notes, musicalKey) : null;
+  const anchor = tracker.anchor;
+  const past = anchor === tracker.history.at(-1) ? tracker.history.slice(0, -1) : tracker.history;
+  cards = anchor ? buildBoard(anchor, past, musicalKey) : [];
+  const candidate = tracker.candidate;
+  const trying = candidate && tracker.history.length ? (cards.find((c) => samePitchClasses(chordPitchClasses(c.chord), candidate.notes)) ?? null) : null;
   suggestView.render({
     history: tracker.history.map(stripChord),
-    current: current ? stripChord(current) : null,
-    heldNotes: current?.notes ?? [],
-    heldSpelling: currentReading ? chordSpelling(currentReading.symbol, musicalKey) : keySpelling(musicalKey),
+    candidate: candidate ? stripChord(candidate) : null,
+    anchorNotes: anchor?.notes ?? [],
     cards,
+    trying,
+    pedal: pedalMode,
+    learnLabels: { commit: learnLabel("commit"), undo: learnLabel("undo"), clear: learnLabel("clear") },
+    playing: { index: playingIndex, settings: playback.settings },
   });
 }
 
@@ -409,6 +495,8 @@ setViewMode(viewMode);
 
 synth.onHeldChange = (held) => {
   keyboardView.setHeld(held);
+  // Before renderChord, which may rebuild the board and re-mark from the stored notes.
+  if (viewMode === "suggest") suggestView.setHeld(held);
   renderChord(held);
 };
 
@@ -453,6 +541,22 @@ renderAudioState();
 
 // --- MIDI -------------------------------------------------------------------
 
+const lastCcValue = new Map<string, number>();
+
+/** True when a button or pedal goes from up to down; holding it or letting go isn't a press. */
+function isPress(channel: number, controller: number, value: number): boolean {
+  const key = `${channel}:${controller}`;
+  const was = lastCcValue.get(key) ?? 0;
+  lastCcValue.set(key, value);
+  return value >= 64 && was < 64;
+}
+
+function runAction(action: ActionId): void {
+  if (action === "commit") commitChord();
+  else if (action === "undo") undoChord();
+  else clearProgression();
+}
+
 function onMidi(msg: MidiMessage): void {
   switch (msg.type) {
     case "noteon":
@@ -464,11 +568,19 @@ function onMidi(msg: MidiMessage): void {
     case "cc": {
       const wasArmed = learn.armed !== null;
       const id = learn.handleCc(msg);
+      const pressed = isPress(msg.channel, msg.controller, msg.value);
       if (wasArmed) renderLearnState();
-      if (id) {
+      if (id && isAction(id)) {
+        // The press that binds a button shouldn't also fire it.
+        if (pressed && !wasArmed) runAction(id);
+      } else if (id) {
         setParam(id, fromNormalized(PARAM_BY_ID[id], msg.value / 127), "external");
       } else if (msg.controller === SUSTAIN_CC) {
-        synth.setSustain(msg.value >= 64);
+        if (viewMode === "suggest" && pedalMode === "commit") {
+          if (pressed) commitChord();
+        } else {
+          synth.setSustain(msg.value >= 64);
+        }
       } else if (msg.controller === ALL_NOTES_OFF_CC) {
         synth.allNotesOff();
       }

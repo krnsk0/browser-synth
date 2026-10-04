@@ -69,6 +69,10 @@ export function miniKeyboard(from: readonly number[], voicing: Voicing, range: {
     const y = isBlackKey(n) ? BLACK_H - 6 : WHITE_H - 7;
     keys.append(el("circle", { cx: center(n), cy: y, r: 3.2, class: "mk-dot" }));
   }
+  // One hidden marker per key, switched on by `showHeld`; white-key markers sit below the black keys.
+  for (let n = range.low; n <= range.high; n++) {
+    keys.append(el("circle", { cx: center(n), cy: isBlackKey(n) ? 14 : 51, r: 3.6, class: "mk-held", "data-note": n }));
+  }
   svg.append(keys);
 
   const arrows = el("g", {});
@@ -88,4 +92,29 @@ export function miniKeyboard(from: readonly number[], voicing: Voicing, range: {
   }
   svg.append(arrows);
   return svg;
+}
+
+/** Marks the keys being played. Notes outside the drawn range show, faded, in the nearest octave that fits. */
+export function showHeld(svg: SVGSVGElement, held: Iterable<number>): void {
+  const markers = [...svg.querySelectorAll<SVGCircleElement>(".mk-held")];
+  if (markers.length === 0) return;
+  const low = Number(markers[0].dataset.note);
+  const high = Number(markers.at(-1)!.dataset.note);
+  const exact = new Set<number>();
+  const folded = new Set<number>();
+  for (const n of held) {
+    if (n >= low && n <= high) {
+      exact.add(n);
+      continue;
+    }
+    let m = n;
+    while (m < low) m += 12;
+    while (m > high) m -= 12;
+    if (m >= low) folded.add(m);
+  }
+  for (const marker of markers) {
+    const n = Number(marker.dataset.note);
+    marker.classList.toggle("on", exact.has(n) || folded.has(n));
+    marker.classList.toggle("folded", folded.has(n) && !exact.has(n));
+  }
 }

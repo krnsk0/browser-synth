@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readChord } from "./chords";
 import { chordSymbol, parseChordSymbol, rootName, type ChordRef } from "./harmony";
 import type { MusicalKey } from "./keys";
+import { MidiLearn } from "./midiLearn";
+import { sanitizePlayback } from "./playback";
 import { ProgressionTracker } from "./progression";
 import { buildBoard, suggestNext } from "./suggest";
 import { voiceLead } from "./voiceLeading";
@@ -142,28 +144,95 @@ describe("voiceLead", () => {
 });
 
 describe("ProgressionTracker", () => {
-  it("records a progression and merges a chord still being built", () => {
+  it("only adds chords to the progression on commit", () => {
+    const t = new ProgressionTracker();
+    t.play(ref("C"), [60, 64, 67], 0);
+    expect(t.history).toHaveLength(0);
+    expect(t.anchor?.chord).toEqual(ref("C"));
+    t.commit();
+    t.play(ref("F"), [60, 65, 69], 2000);
+    t.play(ref("Am"), [60, 64, 69], 4000);
+    expect(t.history.map((h) => h.chord)).toEqual([ref("C")]);
+    expect(t.anchor?.chord).toEqual(ref("C"));
+    expect(t.candidate?.chord).toEqual(ref("Am"));
+    t.commit();
+    expect(t.history.map((h) => h.chord)).toEqual([ref("C"), ref("Am")]);
+    expect(t.candidate).toBeNull();
+    expect(t.commit()).toBeNull();
+  });
+
+  it("merges a chord still being built and follows revoicings", () => {
     const t = new ProgressionTracker();
     t.play(ref("C"), [60, 64, 67], 0);
     expect(t.play(ref("Cmaj7"), [60, 64, 67, 71], 100)).toBe("extended");
-    expect(t.history).toHaveLength(0);
-    expect(t.play(ref("Am"), [57, 60, 64], 2000)).toBe("new");
-    expect(t.history.map((h) => h.chord)).toEqual([ref("Cmaj7")]);
+    expect(t.play(ref("Cmaj7"), [64, 67, 71, 72], 2000)).toBe("revoiced");
+    expect(t.candidate?.notes).toEqual([64, 67, 71, 72]);
   });
 
-  it("treats a new voicing of the same chord as the same chord", () => {
+  it("revoices instead of repeating when the same chord is committed twice", () => {
     const t = new ProgressionTracker();
     t.play(ref("C"), [60, 64, 67], 0);
-    expect(t.play(ref("C"), [64, 67, 72], 2000)).toBe("revoiced");
-    expect(t.current?.notes).toEqual([64, 67, 72]);
+    t.commit();
+    t.play(ref("C"), [64, 67, 72], 1000);
+    t.commit();
+    expect(t.history).toHaveLength(1);
+    expect(t.history[0].notes).toEqual([64, 67, 72]);
   });
 
-  it("starts over after a long silence", () => {
-    const t = new ProgressionTracker({ resetMs: 1000 });
+  it("undoes the last committed chord", () => {
+    const t = new ProgressionTracker();
+    for (const [s, notes, at] of [["C", [60, 64, 67], 0], ["G", [59, 62, 67], 1000]] as const) {
+      t.play(ref(s), notes, at);
+      t.commit();
+    }
+    expect(t.undo()?.chord).toEqual(ref("G"));
+    expect(t.history.map((h) => h.chord)).toEqual([ref("C")]);
+    t.undo();
+    expect(t.undo()).toBeNull();
+  });
+});
+
+describe("saved progressions", () => {
+  it("restores history and candidate through JSON, dropping bad entries", () => {
+    const t = new ProgressionTracker();
     t.play(ref("C"), [60, 64, 67], 0);
-    t.play(ref("F"), [60, 65, 69], 500);
-    t.play(ref("G"), [59, 62, 67], 5000);
-    expect(t.history).toHaveLength(0);
+    t.commit();
+    t.play(ref("G7"), [59, 62, 65, 67], 1000);
+    t.candidate!.via = "dominant";
+    const saved = JSON.parse(JSON.stringify(t.snapshot()));
+    saved.history.push({ chord: { root: 14, quality: "M" }, notes: [60] }, "junk");
+
+    const restored = new ProgressionTracker();
+    restored.restore(saved);
+    expect(restored.history.map((h) => h.chord)).toEqual([ref("C")]);
+    expect(restored.candidate).toMatchObject({ chord: ref("G7"), notes: [59, 62, 65, 67], via: "dominant" });
+    // A fresh chord right after reload is new, not merged into the restored candidate.
+    expect(restored.play(ref("Cmaj7"), [59, 60, 62, 64, 65, 67], 10)).toBe("new");
+  });
+
+  it("ignores garbage", () => {
+    const t = new ProgressionTracker();
+    t.restore("nope");
+    expect(t.snapshot()).toEqual({ history: [], candidate: null });
+  });
+});
+
+describe("MidiLearn actions", () => {
+  it("binds a button to Commit and remembers it", () => {
+    const data = new Map<string, string>();
+    const store = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+    const learn = new MidiLearn(store);
+    learn.arm("commit");
+    expect(learn.handleCc({ channel: 1, controller: 102 })).toBe("commit");
+    expect(new MidiLearn(store).sourceFor("commit")).toEqual({ channel: 1, controller: 102 });
+  });
+});
+
+describe("playback settings", () => {
+  it("clamps tempo and snaps beats per chord", () => {
+    expect(sanitizePlayback({ bpm: 500, beatsPerChord: 3 })).toEqual({ bpm: 200, beatsPerChord: 4 });
+    expect(sanitizePlayback({ bpm: 72.4, beatsPerChord: 2 })).toEqual({ bpm: 72, beatsPerChord: 2 });
+    expect(sanitizePlayback(null)).toEqual({ bpm: 90, beatsPerChord: 4 });
   });
 });
 

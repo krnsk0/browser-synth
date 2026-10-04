@@ -74,10 +74,52 @@ body[data-mode="suggest"] header {
   padding: 8px 24px;
 }
 
+/* The page is exactly the window: columns split what's left into three equal rows of cards. */
+body[data-mode="suggest"] {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body[data-mode="suggest"] main,
+body[data-mode="suggest"] .performance {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 body[data-mode="suggest"] main {
+  width: 100%;
   max-width: 1400px;
   padding: 12px 24px;
-  gap: 10px;
+}
+
+body[data-mode="suggest"] .chord-panel {
+  flex-shrink: 0;
+}
+
+body[data-mode="suggest"] .suggest {
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+body[data-mode="suggest"] .suggest-columns {
+  min-height: 0;
+  align-items: stretch;
+}
+
+body[data-mode="suggest"] .suggest-column {
+  min-height: 0;
+  grid-template-rows: auto repeat(3, minmax(0, 1fr));
+}
+
+body[data-mode="suggest"] .suggestion {
+  min-height: 0;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 body[data-mode="suggest"] .chord-panel {
@@ -442,18 +484,36 @@ button:hover {
 
 .suggest {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
 .progression {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 40px;
+  flex-direction: column;
+  gap: 4px;
   padding: 4px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
+}
+
+.progression-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.progression-controls {
+  justify-content: space-between;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.progression-controls button {
+  padding-block: 1px;
 }
 
 .progression-label,
@@ -491,6 +551,101 @@ button:hover {
 .progression-chip.current {
   border-color: var(--accent);
   color: var(--text);
+}
+
+.progression-chip.candidate {
+  border-style: dashed;
+  border-color: var(--muted);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.progression-chip.candidate:hover {
+  border-color: var(--accent);
+}
+
+.progression-chip.playing {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+  color: var(--text);
+}
+
+.chip-remove {
+  border: none;
+  padding: 0 0 0 2px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.chip-remove:hover {
+  color: var(--text);
+}
+
+.progression-step.tentative {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.strip-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.strip-group select,
+.strip-group input {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.strip-group input {
+  width: 52px;
+}
+
+.bpm {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.play.active {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.pedal[data-mode="commit"],
+.commit:not(:disabled) {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.action-stack .learn {
+  font-size: 10px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+
+.learn.armed {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.suggestion.trying {
+  border-color: var(--group-color);
+  box-shadow: 0 0 0 1px var(--group-color);
 }
 
 .chip-symbol {
@@ -566,11 +721,15 @@ button:hover {
   opacity: 0.6;
 }
 
+/* Fixed height: figured-bass numerals (⁶₄) would otherwise make some header rows taller. */
 .suggestion-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
   min-width: 0;
+  height: 28px;
+  line-height: 28px;
+  overflow: hidden;
 }
 
 .suggestion-symbol {
@@ -595,44 +754,40 @@ button:hover {
   font-weight: 600;
 }
 
+/* Always two lines tall, so one-line and two-line explanations leave the keyboards the same size. */
 .suggestion-why {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  height: calc(2 * 1.35em);
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
 }
 
-.suggestion-foot {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
+.suggestion-then {
+  height: 16px;
   font-size: 12px;
-}
-
-.suggestion-motion {
-  min-width: 0;
+  line-height: 16px;
+  color: color-mix(in srgb, var(--group-color, var(--text)) 75%, var(--text));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: ui-monospace, monospace;
 }
 
-.suggestion-then {
-  flex-shrink: 0;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-/* Fixed height so wide columns don't grow the keyboards; the drawing letterboxes instead. */
-.mini-keyboard {
-  width: 100%;
-  height: clamp(82px, 14.2vh, 130px);
+/* The box takes whatever height the card has left; the drawing scales to fit it. */
+.mini-keyboard-box {
+  position: relative;
+  min-height: 0;
   margin: 2px 0;
+}
+
+.mini-keyboard {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .mk-white {
@@ -664,6 +819,21 @@ button:hover {
   fill: var(--bg);
 }
 
+.mk-held {
+  display: none;
+  fill: #ff3d71;
+  stroke: #fff;
+  stroke-width: 1;
+}
+
+.mk-held.on {
+  display: inline;
+}
+
+.mk-held.folded {
+  opacity: 0.45;
+}
+
 .mk-arrow {
   fill: none;
   stroke: var(--text);
@@ -679,12 +849,6 @@ button:hover {
   font-size: 12px;
   font-weight: 700;
   text-anchor: middle;
-}
-
-@media (max-width: 700px) {
-  .suggest-columns {
-    grid-template-columns: 1fr;
-  }
 }
 
 kbd {

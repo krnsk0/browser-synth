@@ -2,6 +2,15 @@ import { PARAM_BY_ID, type ParamId } from "./params";
 
 const STORAGE_KEY = "browser-synth:midi-map:v1";
 
+/** Buttons that trigger something instead of setting a value. */
+export const ACTIONS = ["undo", "commit", "clear"] as const;
+export type ActionId = (typeof ACTIONS)[number];
+export type LearnTarget = ParamId | ActionId;
+
+export function isAction(target: LearnTarget): target is ActionId {
+  return (ACTIONS as readonly string[]).includes(target);
+}
+
 export interface KeyValueStore {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -14,28 +23,28 @@ export interface CcSource {
 
 const sourceKey = ({ channel, controller }: CcSource) => `${channel}:${controller}`;
 
-/** One CC drives one param; binding a param again replaces its old CC. */
+/** One CC drives one param or action; binding it again replaces its old CC. */
 export class MidiLearn {
-  armed: ParamId | null = null;
-  private readonly bindings = new Map<string, ParamId>();
+  armed: LearnTarget | null = null;
+  private readonly bindings = new Map<string, LearnTarget>();
 
   constructor(private readonly store: KeyValueStore) {
     try {
       const saved = JSON.parse(store.getItem(STORAGE_KEY) ?? "{}") as Record<string, string>;
       for (const [key, id] of Object.entries(saved)) {
-        if (id in PARAM_BY_ID) this.bindings.set(key, id as ParamId);
+        if (id in PARAM_BY_ID || isAction(id as LearnTarget)) this.bindings.set(key, id as LearnTarget);
       }
     } catch {
       // Corrupt storage just means no saved mappings.
     }
   }
 
-  arm(id: ParamId | null): void {
+  arm(id: LearnTarget | null): void {
     this.armed = id;
   }
 
-  /** Returns the param this CC now controls, or null if it is unmapped. */
-  handleCc(source: CcSource): ParamId | null {
+  /** Returns what this CC now controls, or null if it is unmapped. */
+  handleCc(source: CcSource): LearnTarget | null {
     const key = sourceKey(source);
     if (this.armed) {
       this.clear(this.armed);
@@ -46,7 +55,7 @@ export class MidiLearn {
     return this.bindings.get(key) ?? null;
   }
 
-  sourceFor(id: ParamId): CcSource | undefined {
+  sourceFor(id: LearnTarget): CcSource | undefined {
     for (const [key, bound] of this.bindings) {
       if (bound !== id) continue;
       const [channel, controller] = key.split(":").map(Number);
@@ -55,7 +64,7 @@ export class MidiLearn {
     return undefined;
   }
 
-  clear(id: ParamId): void {
+  clear(id: LearnTarget): void {
     for (const [key, bound] of this.bindings) {
       if (bound === id) this.bindings.delete(key);
     }
